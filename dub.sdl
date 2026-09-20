@@ -1,0 +1,9 @@
+name "geo3-d"
+description "Experimental coordinate-system-agnostic 3D Euclidean geometry skeleton"
+authors "Alexander Bernardi"
+copyright "Copyright © 2026 Alexander Bernardi"
+license "MIT"
+targetType "library"
+sourcePaths "source"
+
+dependency "euclid-core-d" path="../euclid-core-d"
