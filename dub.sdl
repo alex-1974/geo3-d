@@ -6,4 +6,4 @@ license "MIT"
 targetType "library"
 sourcePaths "source"
 
-dependency "euclid-core-d" path="../euclid-core-d"
+dependency "euclid-core-d" version="~>0.1.0"
