@@ -14,6 +14,9 @@ public import geo3.scalar :
     MetricScalar,
     isGeoScalar;
 
+public import geo3.segment :
+    Segment3;
+
 public import geo3.simplification :
     douglasPeuckerWorkspaceSize;
 
