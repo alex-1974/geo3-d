@@ -12,6 +12,9 @@ public import geo3.metric :
 public import geo3.point :
     Point3;
 
+public import geo3.polyline_view :
+    Polyline3View;
+
 public import geo3.scalar :
     IntersectionScalar,
     MetricScalar,
