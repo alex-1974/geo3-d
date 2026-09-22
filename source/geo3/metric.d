@@ -15,6 +15,9 @@ module geo3.metric;
 import geo3.point :
     Point3;
 
+import geo3.segment :
+    Segment3;
+
 import geo3.scalar :
     MetricScalar,
     isGeoScalar;
@@ -129,6 +132,107 @@ if (isGeoScalar!T)
 
 
 /**
+ * Squared Euclidean distance between two three-dimensional points.
+ *
+ * Returns:
+ *     The squared distance in `MetricScalar!T`.
+ *
+ * Integer coordinate geometry is converted to floating-point metric
+ * arithmetic after each component difference has been obtained without
+ * signed overflow.
+ *
+ * This operation does not promise exact integral arithmetic. In
+ * particular, long-coordinate results may lose precision after conversion
+ * to double.
+ *
+ * Floating-point NaN and infinity are not rejected. Results follow normal
+ * floating-point arithmetic. Very large finite results may overflow to
+ * infinity.
+ *
+ * This function is a metric computation, not a robust exact distance
+ * comparison predicate.
+ *
+ * No allocation is performed.
+ *
+ * Complexity:
+ *     O(1) time and O(1) auxiliary space.
+ */
+MetricScalar!T squaredDistance(T)(
+    Point3!T a,
+    Point3!T b
+)
+    pure nothrow @safe @nogc
+if (isGeoScalar!T)
+{
+    alias M = MetricScalar!T;
+
+    const M dx =
+        signedMetricDifference(
+            a.x,
+            b.x
+        );
+
+    const M dy =
+        signedMetricDifference(
+            a.y,
+            b.y
+        );
+
+    const M dz =
+        signedMetricDifference(
+            a.z,
+            b.z
+        );
+
+    return
+        dx * dx +
+        dy * dy +
+        dz * dz;
+}
+
+
+/// Example computing squared distance without taking a square root.
+@safe unittest
+{
+    import geo3;
+
+    const a =
+        Point3!int(
+            0,
+            0,
+            0
+        );
+
+    const b =
+        Point3!int(
+            2,
+            3,
+            6
+        );
+
+    static assert(
+        is(
+            typeof(
+                squaredDistance(
+                    a,
+                    b
+                )
+            ) ==
+            double
+        )
+    );
+
+    assert(
+        squaredDistance(
+            a,
+            b
+        ) ==
+        49.0
+    );
+}
+
+
+/**
  * Euclidean distance between two three-dimensional points.
  *
  * Integral coordinate differences are obtained without signed overflow
@@ -200,6 +304,65 @@ if (isGeoScalar!T)
             P(0.0, 0.0, 0.0),
             P(2.0, 3.0, 6.0)
         ) ==
+        7.0
+    );
+}
+
+
+/**
+ * Euclidean length of a segment.
+ *
+ * Uses the same metric computation policy as point-to-point distance.
+ *
+ * In particular:
+ *
+ * - integer coordinate differences are obtained without signed overflow;
+ * - int, long and float geometry compute in double;
+ * - real geometry computes in real;
+ * - hypot is used indirectly through distance().
+ *
+ * Floating-point non-finite coordinates follow the same arithmetic
+ * semantics as distance().
+ *
+ * This is a metric computation, not an exact topological predicate.
+ *
+ * No allocation is performed.
+ *
+ * Complexity:
+ *     O(1) time and O(1) auxiliary space.
+ */
+MetricScalar!T segmentLength(T)(Segment3!T segment)
+    pure nothrow @safe @nogc
+if (isGeoScalar!T)
+{
+    return distance(
+        segment.a,
+        segment.b
+    );
+}
+
+
+/// Example computing the Euclidean length of a 3D segment.
+@safe unittest
+{
+    import geo3;
+
+    const segment =
+        Segment3!double(
+            Point3!double(
+                0.0,
+                0.0,
+                0.0
+            ),
+            Point3!double(
+                2.0,
+                3.0,
+                6.0
+            )
+        );
+
+    assert(
+        segmentLength(segment) ==
         7.0
     );
 }
@@ -440,6 +603,98 @@ if (isGeoScalar!T)
             PI(int.max, int.max, int.max)
         ) >
         0.0
+    );
+
+
+    /*
+     * Squared distance uses the same robust integral differencing policy.
+     *
+     * Cover each 3D axis independently so no component can accidentally
+     * regress to convert-before-subtract behaviour.
+     */
+    assert(
+        squaredDistance(
+            PL(long.max, 0, 0),
+            PL(long.max - 1, 0, 0)
+        ) ==
+        1.0
+    );
+
+    assert(
+        squaredDistance(
+            PL(0, long.max, 0),
+            PL(0, long.max - 1, 0)
+        ) ==
+        1.0
+    );
+
+    assert(
+        squaredDistance(
+            PL(0, 0, long.max),
+            PL(0, 0, long.max - 1)
+        ) ==
+        1.0
+    );
+
+    assert(
+        squaredDistance(
+            P(0.0, 0.0, 0.0),
+            P(2.0, 3.0, 6.0)
+        ) ==
+        49.0
+    );
+
+    /*
+     * squaredDistance deliberately permits ordinary floating-point square
+     * overflow after the robust component differences have been obtained.
+     */
+    const hugeSquared =
+        squaredDistance(
+            P(-double.max, 0.0, 0.0),
+            P(double.max, 0.0, 0.0)
+        );
+
+    assert(
+        hugeSquared ==
+        double.infinity
+    );
+
+
+    /*
+     * Segment length is exactly the point-distance metric applied to the
+     * stored endpoints, including 3D Z differences and degenerate segments.
+     */
+    alias S = Segment3!double;
+
+    assert(
+        segmentLength(
+            S(
+                P(0.0, 0.0, 0.0),
+                P(2.0, 3.0, 6.0)
+            )
+        ) ==
+        7.0
+    );
+
+    assert(
+        segmentLength(
+            S(
+                P(4.0, -2.0, 9.0),
+                P(4.0, -2.0, 9.0)
+            )
+        ) ==
+        0.0
+    );
+
+    const longSegment =
+        Segment3!long(
+            PL(0, 0, long.max),
+            PL(0, 0, long.max - 1)
+        );
+
+    assert(
+        segmentLength(longSegment) ==
+        1.0
     );
 
 

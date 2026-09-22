@@ -10,7 +10,9 @@ public import geo3.linear_ring_view :
     LinearRing3View;
 
 public import geo3.metric :
-    distance;
+    distance,
+    segmentLength,
+    squaredDistance;
 
 public import geo3.point :
     Point3;
