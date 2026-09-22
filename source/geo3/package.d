@@ -1,5 +1,8 @@
 module geo3;
 
+public import geo3.bounds :
+    Bounds3;
+
 public import geo3.intersection :
     SegmentIntersectionKind;
 
