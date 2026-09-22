@@ -45,6 +45,10 @@ jobs:
         shell: bash
         run: dub test --compiler="$DC" --force
 
+      - name: Run lifetime compile-negative tests
+        shell: bash
+        run: bash tests/compile-negative/run.sh "$DC"
+
       - name: Build release configuration
         shell: bash
         run: dub build --build=release --compiler="$DC" --force
