@@ -20,3 +20,6 @@ public import geo3.simplification :
 public import geo3.topology_validation :
     RingValidationIssue,
     RingValidationResult;
+
+public import geo3.vector :
+    Vector3;
