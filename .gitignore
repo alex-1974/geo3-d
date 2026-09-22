@@ -9,3 +9,5 @@ __dummy.html
 *.dll
 *.dylib
 *-test-library
+
+dub.selections.json
