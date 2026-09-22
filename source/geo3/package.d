@@ -1,5 +1,8 @@
 module geo3;
 
+public import geo3.bounding_box :
+    tryBounds;
+
 public import geo3.bounds :
     Bounds3;
 
