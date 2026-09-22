@@ -15,6 +15,9 @@ module geo3.metric;
 import geo3.point :
     Point3;
 
+import geo3.polyline_view :
+    Polyline3View;
+
 import geo3.segment :
     Segment3;
 
@@ -24,6 +27,9 @@ import geo3.scalar :
 
 import std.math.algebraic :
     hypot;
+
+import std.math.traits :
+    isFinite;
 
 
 /*
@@ -368,6 +374,105 @@ if (isGeoScalar!T)
 }
 
 
+/**
+ * Euclidean length of a polyline.
+ *
+ * The result is the sum of the lengths of all consecutive segments in
+ * stored point order.
+ *
+ * Empty and singleton polylines have length zero.
+ *
+ * Uses the same `MetricScalar` policy as `segmentLength()`.
+ *
+ * Segment lengths are accumulated in stored order in `MetricScalar!T`
+ * using Kahan-style compensated summation to reduce floating-point
+ * accumulation error.
+ *
+ * Compensation improves mixed-scale sums but does not make the result
+ * exact, correctly rounded, or independent of segment order. Each segment
+ * length remains an ordinary floating-point metric computation.
+ *
+ * Non-finite segment lengths and accumulated overflow propagate according
+ * to normal floating-point arithmetic. The accumulated result may therefore
+ * be NaN or infinity.
+ *
+ * No allocation or point copying is performed.
+ *
+ * Complexity:
+ *     O(n) time and O(1) auxiliary space for n stored points.
+ */
+MetricScalar!T polylineLength(T)(Polyline3View!T polyline)
+    pure nothrow @safe @nogc
+if (isGeoScalar!T)
+{
+    alias M = MetricScalar!T;
+
+    M result = M(0);
+    M correction = M(0);
+
+    foreach (i; 0 .. polyline.segmentCount)
+    {
+        const M value =
+            segmentLength(
+                polyline.segment(i)
+            );
+
+        const M adjusted =
+            value - correction;
+
+        const M next =
+            result + adjusted;
+
+        /*
+         * A non-finite next value covers:
+         *
+         * - a non-finite segment length;
+         * - accumulated finite overflow;
+         * - an already non-finite running result.
+         *
+         * Preserve that ordinary floating-point result and discard the
+         * compensation state before continuing.
+         */
+        if (!isFinite(next))
+        {
+            result = next;
+            correction = M(0);
+            continue;
+        }
+
+        correction =
+            (next - result) - adjusted;
+
+        result = next;
+    }
+
+    return result;
+}
+
+
+/// Example summing consecutive three-dimensional segment lengths.
+@safe unittest
+{
+    import geo3;
+
+    alias P = Point3!double;
+
+    P[3] points = [
+        P(0.0, 0.0, 0.0),
+        P(2.0, 3.0, 6.0),
+        P(4.0, 6.0, 12.0)
+    ];
+
+    const polyline =
+        Polyline3View!double(points[]);
+
+    assert(
+        polylineLength(polyline) ==
+        14.0
+    );
+}
+
+
 @safe unittest
 {
     /*
@@ -695,6 +800,235 @@ if (isGeoScalar!T)
     assert(
         segmentLength(longSegment) ==
         1.0
+    );
+
+
+    /*
+     * Polyline length is the sum of consecutive 3D segment lengths.
+     */
+    {
+        alias PP = Point3!double;
+
+        PP[3] points = [
+            PP(0.0, 0.0, 0.0),
+            PP(2.0, 3.0, 6.0),
+            PP(4.0, 6.0, 12.0)
+        ];
+
+        auto polyline =
+            Polyline3View!double(points[]);
+
+        assert(polyline.segmentCount == 2);
+
+        assert(
+            polylineLength(polyline) ==
+            14.0
+        );
+    }
+
+
+    /*
+     * Compensated accumulation preserves small segment lengths that ordinary
+     * sequential addition can lose after the running total becomes large.
+     *
+     * Each block contributes exactly:
+     *
+     *     2 * 2^52 + 2
+     *
+     * and the complete expected result is itself exactly representable as
+     * binary64.
+     */
+    {
+        alias PP = Point3!double;
+
+        enum size_t blocks = 256;
+        enum double large = 0x1p52;
+        enum double expected = 0x1p61 + 512.0;
+
+        PP[1 + blocks * 4] points;
+
+        size_t index;
+
+        points[index++] =
+            PP(0.0, 0.0, 0.0);
+
+        foreach (_; 0 .. blocks)
+        {
+            points[index++] =
+                PP(large, 0.0, 0.0);
+
+            points[index++] =
+                PP(0.0, 0.0, 0.0);
+
+            points[index++] =
+                PP(1.0, 0.0, 0.0);
+
+            points[index++] =
+                PP(0.0, 0.0, 0.0);
+        }
+
+        assert(index == points.length);
+
+        const length =
+            polylineLength(
+                Polyline3View!double(points[])
+            );
+
+        assert(length == expected);
+    }
+
+
+    /*
+     * Compensated accumulation retains normal floating-point non-finite
+     * semantics.
+     */
+    {
+        alias PP = Point3!double;
+
+        /*
+         * Exercise the third coordinate explicitly.
+         */
+        PP[2] infinitePoints = [
+            PP(0.0, 0.0, 0.0),
+            PP(0.0, 0.0, double.infinity)
+        ];
+
+        assert(
+            polylineLength(
+                Polyline3View!double(
+                    infinitePoints[]
+                )
+            ) ==
+            double.infinity
+        );
+
+
+        PP[2] nanPoints = [
+            PP(0.0, 0.0, 0.0),
+            PP(0.0, 0.0, double.nan)
+        ];
+
+        const nanLength =
+            polylineLength(
+                Polyline3View!double(
+                    nanPoints[]
+                )
+            );
+
+        assert(nanLength != nanLength);
+
+
+        /*
+         * Every individual segment length is finite, but two double.max
+         * segments overflow the accumulated result. A later finite segment
+         * must leave that infinity intact.
+         */
+        PP[4] overflowPoints = [
+            PP(0.0, 0.0, 0.0),
+            PP(double.max, 0.0, 0.0),
+            PP(0.0, 0.0, 0.0),
+            PP(1.0, 0.0, 0.0)
+        ];
+
+        assert(
+            polylineLength(
+                Polyline3View!double(
+                    overflowPoints[]
+                )
+            ) ==
+            double.infinity
+        );
+    }
+
+
+    /*
+     * Empty and singleton polylines have zero length.
+     */
+    {
+        Point3!int[] emptyPoints;
+
+        auto empty =
+            Polyline3View!int(
+                emptyPoints
+            );
+
+        assert(
+            polylineLength(empty) ==
+            0.0
+        );
+
+        Point3!int[1] singletonPoints = [
+            Point3!int(7, -3, 11)
+        ];
+
+        auto singleton =
+            Polyline3View!int(
+                singletonPoints[]
+            );
+
+        assert(
+            polylineLength(singleton) ==
+            0.0
+        );
+    }
+
+
+    /*
+     * Polyline metric result types follow the shared MetricScalar policy.
+     */
+    static assert(
+        is(
+            typeof(
+                polylineLength(
+                    Polyline3View!int.init
+                )
+            ) ==
+            double
+        )
+    );
+
+    static assert(
+        is(
+            typeof(
+                polylineLength(
+                    Polyline3View!long.init
+                )
+            ) ==
+            double
+        )
+    );
+
+    static assert(
+        is(
+            typeof(
+                polylineLength(
+                    Polyline3View!float.init
+                )
+            ) ==
+            double
+        )
+    );
+
+    static assert(
+        is(
+            typeof(
+                polylineLength(
+                    Polyline3View!double.init
+                )
+            ) ==
+            double
+        )
+    );
+
+    static assert(
+        is(
+            typeof(
+                polylineLength(
+                    Polyline3View!real.init
+                )
+            ) ==
+            real
+        )
     );
 
 
