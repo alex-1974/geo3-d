@@ -1,0 +1,10 @@
+name "orientation3-exact-research"
+description "Research prototype for exact 3D integral orientation"
+authors "Alexander Bernardi"
+license "MIT"
+targetType "executable"
+sourcePaths "source"
+
+dflags "-preview=dip1000"
+
+dependency "geo3-d" path="../.."

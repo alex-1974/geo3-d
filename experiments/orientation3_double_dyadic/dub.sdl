@@ -1,0 +1,10 @@
+name "orientation3-double-dyadic-research"
+description "Research prototype for full-range exact binary64 orient3d"
+authors "Alexander Bernardi"
+license "MIT"
+targetType "executable"
+sourcePaths "source"
+
+dflags "-preview=dip1000"
+
+dependency "geo3-d" path="../.."
