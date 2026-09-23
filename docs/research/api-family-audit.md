@@ -106,66 +106,59 @@ operation names.
 
 ## Structural audit
 
-| Concept | geo-d v2.0.0 | geo3-d baseline | Status | Required family direction |
+| Concept | geo-d v2.0.0 | geo3-d current | Status | Required family direction |
 |---|---|---|---|---|
 | point value representation | `Point2` | `Point3` | aligned | Preserve explicit `x/y/z`, zero `.init`, exact value equality, supported scalar domain |
-| point finite-state query | `Point2.isFinite` | absent | natural 3D counterpart missing | `Point3.isFinite` should follow the same finite/non-finite policy over three coordinates |
-| point affine algebra | `Point2` +/− `Vector2`, `Point2 - Point2 -> Vector2` | unavailable | natural 3D counterpart missing | Mirror the 2D affine contract once `Vector3` exists |
-| forbidden point algebra | point + point, unary point negation, point scaling unavailable | currently unavailable | aligned | Preserve these exclusions when `Vector3` and affine point operations are added; add compile-negative regression tests |
-| vector | `Vector2` | absent | natural 3D counterpart missing | `Vector3` should provide the corresponding vector-space algebra |
-| segment | `Segment2` | absent | natural 3D counterpart missing | `Segment3` with endpoint order, valid degeneracy, exact equality and `isFinite` |
-| axis-aligned bounds | `Bounds2` | absent | natural 3D counterpart missing | `Bounds3`; explicit empty state and component-wise XYZ bounds |
-| polyline view | `Polyline2View` | absent | natural 3D counterpart missing | `Polyline3View`; same borrowing, indexing and segment traversal model |
-| linear ring view | `LinearRing2View` | absent | natural 3D counterpart missing | `LinearRing3View` as a cyclic sequence of 3D points does not itself require planarity |
+| point finite-state query | `Point2.isFinite` | present | aligned | `Point3.isFinite` follows the same finite/non-finite policy over three coordinates |
+| point affine algebra | `Point2` +/− `Vector2`, `Point2 - Point2 -> Vector2` | present | aligned | `Point3` mirrors the established affine point/vector contract in three dimensions |
+| forbidden point algebra | point + point, unary point negation, point scaling unavailable | unavailable | aligned | The established exclusions remain preserved alongside the implemented affine point/vector operations |
+| vector | `Vector2` | `Vector3` | aligned | Corresponding three-dimensional vector-space algebra is implemented |
+| segment | `Segment2` | `Segment3` | aligned | Endpoint order, valid degeneracy, exact equality and `isFinite` are preserved |
+| axis-aligned bounds | `Bounds2` | `Bounds3` | aligned | Explicit empty state and component-wise XYZ bounds are implemented |
+| polyline view | `Polyline2View` | `Polyline3View` | aligned | Same borrowing, indexing and segment traversal model, extended to 3D |
+| linear ring view | `LinearRing2View` | `LinearRing3View` | aligned | Cyclic 3D representation is implemented without imposing planarity |
 | polygon view | `Polygon2View` | absent | 2D-only | Do not infer `Polygon3View`; an embedded planar surface requires separate semantics and a consumer |
 | polygon area | `signedArea`, `polygonArea`, `AreaScalar` | absent | 2D-only | No automatic 3D counterpart |
 | point-in-polygon | `PointPolygonLocation`, `tryClassifyPointInPolygon` | absent | 2D-only | No automatic 3D counterpart |
 
 ## Metric audit
 
-| Concept | geo-d v2.0.0 | geo3-d baseline | Status | Required family direction |
+| Concept | geo-d v2.0.0 | geo3-d current | Status | Required family direction |
 |---|---|---|---|---|
 | `MetricScalar` | shared core identity | shared core identity | aligned | Keep one declaration identity through `euclid-core-d` |
-| point `distance` | robust metric differencing policy + `hypot` | present | not aligned / repair required | API name/type shape aligns, but current numerical implementation does not yet match the 2D integer-difference policy |
-| `squaredDistance` | present | absent | natural 3D counterpart missing | Same metric scalar and non-exact metric semantics |
-| `segmentLength` | present | absent | natural 3D counterpart missing | Same operation name and segment-first UFCS shape |
-| `polylineLength` | present | absent | natural 3D counterpart missing | Same stored-order summation semantics unless research shows a reason to differ |
-| `tryNearestPoint` | segment / point operation | absent | natural 3D counterpart missing | Segment-first family form is mathematically natural in 3D |
-| `tryPointSegmentDistance` | canonical segment-first v2 form | absent | natural 3D counterpart missing | Preserve `tryPointSegmentDistance(segment, point, result)` |
+| point `distance` | robust metric differencing policy + `hypot` | present | aligned | Uses exact integral component differencing before metric conversion and 3D `hypot` composition |
+| `squaredDistance` | present | present | aligned | Same metric scalar and non-exact metric semantics, extended to Z |
+| `segmentLength` | present | present | aligned | Same operation name and segment-first UFCS shape |
+| `polylineLength` | present | present | aligned | Same stored-order compensated summation policy over `Polyline3View` |
+| `tryNearestPoint` | segment / point operation | present | aligned | Segment-first form; result uses `Point3!(MetricScalar!T)` |
+| `tryPointSegmentDistance` | canonical segment-first v2 form | present | aligned | Segment-first form with robust 3D interior perpendicular-distance computation |
 
-### Current `distance` numerical gap
+The 3D metric implementation now preserves the established 2D scalar policy
+where the mathematics is dimension-neutral:
 
-The current 3D implementation computes each component difference as:
+- signed integral component differences are obtained before conversion to
+  `MetricScalar`;
+- large nearby integral coordinates therefore retain small differences;
+- point distance uses nested `hypot` rather than deriving distance from
+  `squaredDistance`;
+- point-to-segment projection uses a scaled dot-product formulation outside
+  a conservative direct-product range;
+- interior point-to-segment distance uses the 3D cross-product norm
+  `||d × r|| / ||d||` without first constructing a rounded nearest point;
+- `tryNearestPoint` and `tryPointSegmentDistance` reject non-finite input and
+  preserve transactional failure semantics.
 
-```text
-cast(MetricScalar, coordinate A)
--
-cast(MetricScalar, coordinate B)
-```
-
-For integral coordinates, this differs materially from the `geo-d v2.0.0`
-policy, which obtains the signed coordinate difference without signed overflow
-before conversion to metric floating-point arithmetic.
-
-For sufficiently large `long` coordinates, two distinct nearby integers can
-round to the same floating-point value when converted before subtraction.
-The current 3D implementation can therefore lose a small non-zero coordinate
-difference.
-
-The nested `hypot` magnitude computation is useful, but does not repair
-information already lost during coordinate differencing.
-
-Before `geo3-d` metric API is treated as family-aligned, integer differencing
-must receive the same numerical review as the 2D implementation.
+These remain floating-point metric computations, not exact topological
+predicates.
 
 ## Conversion audit
 
-| Concept | geo-d v2.0.0 | geo3-d baseline | Status | Required family direction |
+| Concept | geo-d v2.0.0 | geo3-d current | Status | Required family direction |
 |---|---|---|---|---|
-| `tryConvert` point | present | absent | natural 3D counterpart missing | Same checked per-coordinate conversion rules extended to Z |
-| `tryConvert` vector | present | absent | natural 3D counterpart missing | Same scalar conversion policy |
-| `tryConvert` segment | present | absent | natural 3D counterpart missing | Same transactional endpoint conversion |
-| explicit rounding helpers | `rounded`, `floored`, `ceiled`, `truncated` | absent | consumer required | Review exact 2D overload set before introducing matching 3D forms |
+| `tryConvert` point | present | present | aligned | Same checked per-coordinate conversion rules extended to Z |
+| `tryConvert` vector | present | present | aligned | Same scalar conversion policy extended to Z |
+| `tryConvert` segment | present | present | aligned | Same transactional endpoint conversion |
+| explicit rounding helpers | `rounded`, `floored`, `ceiled`, `truncated` | absent | consumer required | Require a concrete consumer or separate design decision |
 
 No implicit quantisation should be introduced merely to simplify conversion.
 
@@ -192,7 +185,13 @@ Natural `tryBounds` families exist for:
 
 A polygon overload is not implied because `Polygon3View` is not implied.
 
-Status: natural 3D counterpart missing.
+Status: aligned.
+
+`tryBounds` is implemented for `Segment3`, `Polyline3View`, and
+`LinearRing3View`. Empty views succeed with `Bounds3.init`; singleton and
+degenerate geometry produce non-empty degenerate bounds; NaN causes
+transactional failure while infinities remain representable. Ring bounds do
+not impose topology or planarity validation.
 
 ## Orientation audit
 
@@ -270,9 +269,9 @@ Therefore representation and validation must be considered separately.
 
 ### Representation
 
-Status: natural 3D counterpart missing.
+Status: aligned.
 
-Expected family properties:
+Implemented family properties:
 
 - non-owning read-only view;
 - caller-owned contiguous backing storage;
@@ -416,34 +415,39 @@ Items to review before a stable `geo3-d` release include:
 
 These are engineering-family concerns, not reasons to add geometry API.
 
-## Initial sequencing
+## Implementation status and remaining sequencing
 
-This audit suggests the following dependency order for future work.
+The original foundation sequence is complete.
 
 ### Foundation family
 
-1. `Vector3`
-2. complete `Point3` family semantics
-3. `Segment3`
-4. `Bounds3`
-5. `Polyline3View`
-6. `LinearRing3View`
+1. `Vector3` — aligned
+2. complete `Point3` family semantics — aligned
+3. `Segment3` — aligned
+4. `Bounds3` — aligned
+5. `Polyline3View` — aligned
+6. `LinearRing3View` — aligned
 
 ### Dimension-neutral operation families
 
-After their prerequisite types exist:
+The currently identified dimension-neutral operation family is implemented:
 
-- `squaredDistance`
-- corrected/family-aligned `distance`
-- `segmentLength`
-- `polylineLength`
-- `tryNearestPoint`
-- `tryPointSegmentDistance`
-- `tryBounds`
-- `tryConvert`
+- `squaredDistance` — aligned;
+- corrected/family-aligned `distance` — aligned;
+- `segmentLength` — aligned;
+- `polylineLength` — aligned;
+- `tryNearestPoint` — aligned;
+- `tryPointSegmentDistance` — aligned;
+- `tryBounds` — aligned;
+- `tryConvert` — aligned.
 
-Each addition remains subject to a concrete consumer or a research-backed
+These operations preserve the established `geo-d v2.0.0` contract where the
+mathematics is dimensionally symmetric while extending component-wise
+behaviour to Z.
+
+Future additions remain subject to a concrete consumer or a research-backed
 need rather than API completion for its own sake.
+
 
 ### Research-gated 3D algorithms
 
@@ -472,14 +476,19 @@ Those require their own consumers and design decisions.
 
 ## Audit conclusion
 
-The current `geo3-d` repository successfully proves the package relationship
-and shared declaration identity with `geo-d`, but it is still an architecture
-skeleton rather than a family-complete 3D geometry foundation.
+The current `geo3-d` repository now contains the core 3D value/view
+foundation and the identified dimension-neutral metric, bounds, and checked
+conversion families corresponding to `geo-d v2.0.0`.
 
-The next design work should preserve the established `geo-d v2.0.0` contract
-where the mathematics is dimensionally symmetric and isolate genuine 3D
-mathematics behind explicit research decisions.
+The remaining major gaps are no longer mechanical family-completion work.
+They involve genuinely three-dimensional mathematics and therefore remain
+research-gated:
 
-The first natural foundation gap is `Vector3`, because completing `Vector3`
-also permits `Point3` to implement the already-established affine family
-contract.
+- `Orientation3` and robust affine 3D orientation / coplanarity semantics;
+- robust 3D segment relationships and intersection;
+- `validateRing` semantics for three-dimensional cyclic geometry;
+- near-degenerate and extreme-scale numerical behaviour for those predicates.
+
+Further design work should continue to preserve the established
+`geo-d v2.0.0` contract where the mathematics is dimensionally symmetric and
+isolate genuine 3D mathematics behind explicit research decisions.
