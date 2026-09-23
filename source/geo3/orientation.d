@@ -18,6 +18,16 @@
  */
 module geo3.orientation;
 
+import geo3.internal.orientation_dyadic :
+    orientationDyadicExact;
+
+import geo3.internal.orientation_expansion :
+    tryOrientationExactExpansion;
+
+import geo3.internal.orientation_filter :
+    OrientationFilterResult,
+    orientationFilter;
+
 import geo3.internal.orientation_integral :
     orientationIntegralSign;
 
@@ -139,6 +149,109 @@ Orientation3 orientation(
     );
 }
 
+/**
+ * Robust exact orientation predicate for Point3!double.
+ *
+ * Preconditions:
+ *
+ *     all coordinates are finite.
+ *
+ * Returns the mathematically exact sign of:
+ *
+ *     det(b-a, c-a, d-a)
+ *
+ * over the complete finite IEEE binary64 coordinate domain.
+ *
+ * The implementation uses a staged backend:
+ *
+ * 1. a certified binary64 floating-point filter;
+ * 2. exact expansion arithmetic in its validated working range;
+ * 3. an exact fixed-width dyadic fallback for every remaining finite input.
+ *
+ * The internal `uncertain` filter state is never exposed through the public
+ * API.
+ *
+ * Degenerate affine configurations are valid inputs and return
+ * `Orientation3.coplanar` exactly when the determinant is mathematically zero.
+ *
+ * No allocation is performed.
+ *
+ * Complexity:
+ *     O(1) time and O(1) auxiliary space.
+ */
+Orientation3 orientation(
+    Point3!double a,
+    Point3!double b,
+    Point3!double c,
+    Point3!double d
+)
+    pure nothrow @safe @nogc
+{
+    assert(a.isFinite);
+    assert(b.isFinite);
+    assert(c.isFinite);
+    assert(d.isFinite);
+
+
+    const OrientationFilterResult filtered =
+        orientationFilter(
+            a,
+            b,
+            c,
+            d
+        );
+
+
+    final switch (filtered)
+    {
+        case OrientationFilterResult.negative:
+            return Orientation3.negative;
+
+        case OrientationFilterResult.coplanar:
+            return Orientation3.coplanar;
+
+        case OrientationFilterResult.positive:
+            return Orientation3.positive;
+
+        case OrientationFilterResult.uncertain:
+            break;
+    }
+
+
+    int sign;
+
+
+    if (
+        tryOrientationExactExpansion(
+            a,
+            b,
+            c,
+            d,
+            sign
+        )
+    )
+    {
+        return fromDeterminantSign(
+            sign
+        );
+    }
+
+
+    /*
+     * Every finite binary64 input not covered by the expansion backend is
+     * exactly representable by the full-range fixed-width dyadic backend.
+     */
+    return fromDeterminantSign(
+        orientationDyadicExact(
+            a,
+            b,
+            c,
+            d
+        )
+    );
+}
+
+
 
 static assert(
     Orientation3.init ==
@@ -159,11 +272,13 @@ static assert(
 
 
 /*
- * Floating-point orientation is deliberately not introduced by the integral
- * implementation slice.
+ * binary64 is supported by the complete filter -> expansion -> dyadic
+ * pipeline.
  *
- * It will become public only after the certified filter and exact fallback
- * pipeline is present.
+ * binary32 remains deliberately deferred to Slice 5, where exact promotion
+ * to binary64 will reuse this backend.
+ *
+ * real remains unsupported until a platform-aware robust backend is designed.
  */
 static assert(
     !__traits(
@@ -178,7 +293,7 @@ static assert(
 );
 
 static assert(
-    !__traits(
+    __traits(
         compiles,
         orientation(
             Point3!double.init,
@@ -206,6 +321,12 @@ version(unittest)
 {
     import std.bigint :
         BigInt;
+
+    import std.bitmanip :
+        DoubleRep;
+
+    import std.math.traits :
+        isFinite;
 
 
     /*
@@ -282,6 +403,179 @@ version(unittest)
         return Orientation3.coplanar;
     }
 
+    /*
+     * Independent exact finite binary64 decoding:
+     *
+     *     value = integer * 2^-1074
+     *
+     * Production robust-predicate arithmetic is not reused here.
+     */
+    private BigInt oracleBinary64Integer(double value)
+        @safe
+    {
+        assert(isFinite(value));
+
+
+        DoubleRep representation;
+
+        representation.value =
+            value;
+
+
+        const ulong fraction =
+            representation.fraction;
+
+        const uint rawExponent =
+            representation.exponent;
+
+
+        ulong mantissa;
+        uint shift;
+
+
+        if (rawExponent == 0)
+        {
+            mantissa =
+                fraction;
+
+            shift =
+                0;
+        }
+        else
+        {
+            mantissa =
+                (1UL << 52) |
+                fraction;
+
+            shift =
+                rawExponent - 1;
+        }
+
+
+        if (mantissa == 0)
+            return BigInt(0);
+
+
+        BigInt result =
+            BigInt(mantissa);
+
+        if (shift != 0)
+            result <<= shift;
+
+        if (representation.sign)
+            result = -result;
+
+
+        return result;
+    }
+
+
+    /*
+     * Independent arbitrary-precision oracle for Point3!double.
+     */
+    private Orientation3 oracleDoubleOrientation(
+        Point3!double a,
+        Point3!double b,
+        Point3!double c,
+        Point3!double d
+    )
+        @safe
+    {
+        assert(a.isFinite);
+        assert(b.isFinite);
+        assert(c.isFinite);
+        assert(d.isFinite);
+
+
+        const BigInt ax =
+            oracleBinary64Integer(a.x);
+
+        const BigInt ay =
+            oracleBinary64Integer(a.y);
+
+        const BigInt az =
+            oracleBinary64Integer(a.z);
+
+
+        const BigInt bx =
+            oracleBinary64Integer(b.x);
+
+        const BigInt by =
+            oracleBinary64Integer(b.y);
+
+        const BigInt bz =
+            oracleBinary64Integer(b.z);
+
+
+        const BigInt cx =
+            oracleBinary64Integer(c.x);
+
+        const BigInt cy =
+            oracleBinary64Integer(c.y);
+
+        const BigInt cz =
+            oracleBinary64Integer(c.z);
+
+
+        const BigInt dx =
+            oracleBinary64Integer(d.x);
+
+        const BigInt dy =
+            oracleBinary64Integer(d.y);
+
+        const BigInt dz =
+            oracleBinary64Integer(d.z);
+
+
+        const BigInt ux =
+            bx - ax;
+
+        const BigInt uy =
+            by - ay;
+
+        const BigInt uz =
+            bz - az;
+
+
+        const BigInt vx =
+            cx - ax;
+
+        const BigInt vy =
+            cy - ay;
+
+        const BigInt vz =
+            cz - az;
+
+
+        const BigInt wx =
+            dx - ax;
+
+        const BigInt wy =
+            dy - ay;
+
+        const BigInt wz =
+            dz - az;
+
+
+        const BigInt determinant =
+              ux * vy * wz
+            + uy * vz * wx
+            + uz * vx * wy
+            - uz * vy * wx
+            - uy * vx * wz
+            - ux * vz * wy;
+
+
+        if (determinant > 0)
+            return Orientation3.positive;
+
+        if (determinant < 0)
+            return Orientation3.negative;
+
+        return Orientation3.coplanar;
+    }
+
+
 
     private Orientation3 opposite(
         Orientation3 value
@@ -335,6 +629,141 @@ version(unittest)
             cast(long) nextRandom(state)
         );
     }
+
+    private double randomFiniteDouble(ref ulong state)
+        pure nothrow @safe @nogc
+    {
+        const ulong bits =
+            nextRandom(state);
+
+
+        DoubleRep representation;
+
+        representation.value =
+            0.0;
+
+
+        representation.fraction =
+            bits &
+            (
+                (1UL << 52) -
+                1
+            );
+
+
+        ushort exponent =
+            cast(ushort)(
+                (
+                    bits >>
+                    52
+                ) &
+                0x7ffUL
+            );
+
+
+        /*
+         * Raw exponent 2047 represents infinity or NaN.
+         * Remap it to the largest finite exponent.
+         */
+        if (exponent == 0x7ff)
+            exponent = 0x7fe;
+
+
+        representation.exponent =
+            exponent;
+
+        representation.sign =
+            (
+                bits &
+                (1UL << 63)
+            ) != 0;
+
+
+        return representation.value;
+    }
+
+
+    private Point3!double randomDoublePoint(ref ulong state)
+        pure nothrow @safe @nogc
+    {
+        return Point3!double(
+            randomFiniteDouble(state),
+            randomFiniteDouble(state),
+            randomFiniteDouble(state)
+        );
+    }
+
+
+    private void verifyDoubleAgainstOracle(
+        Point3!double a,
+        Point3!double b,
+        Point3!double c,
+        Point3!double d
+    )
+        @safe
+    {
+        const Orientation3 expected =
+            oracleDoubleOrientation(
+                a,
+                b,
+                c,
+                d
+            );
+
+        const Orientation3 actual =
+            orientation(
+                a,
+                b,
+                c,
+                d
+            );
+
+
+        assert(
+            actual ==
+            expected
+        );
+
+
+        assert(
+            orientation(
+                a,
+                c,
+                b,
+                d
+            ) ==
+            opposite(actual)
+        );
+
+
+        /*
+         * A four-cycle is odd.
+         */
+        assert(
+            orientation(
+                b,
+                c,
+                d,
+                a
+            ) ==
+            opposite(actual)
+        );
+
+
+        /*
+         * Two transpositions preserve sign.
+         */
+        assert(
+            orientation(
+                b,
+                a,
+                d,
+                c
+            ) ==
+            actual
+        );
+    }
+
 
 
     private void verifyAgainstOracle(T)(
@@ -713,6 +1142,212 @@ version(unittest)
             randomLongPoint(state),
             randomLongPoint(state),
             randomLongPoint(state)
+        );
+    }
+}
+
+
+@safe unittest
+{
+    alias P =
+        Point3!double;
+
+
+    const P zero =
+        P(
+            0.0,
+            0.0,
+            0.0
+        );
+
+
+    /*
+     * Canonical public binary64 sign convention.
+     */
+    verifyDoubleAgainstOracle(
+        zero,
+        P(
+            1.0,
+            0.0,
+            0.0
+        ),
+        P(
+            0.0,
+            1.0,
+            0.0
+        ),
+        P(
+            0.0,
+            0.0,
+            1.0
+        )
+    );
+
+    assert(
+        orientation(
+            zero,
+            P(1.0, 0.0, 0.0),
+            P(0.0, 1.0, 0.0),
+            P(0.0, 0.0, 1.0)
+        ) ==
+        Orientation3.positive
+    );
+
+
+    /*
+     * Near-coplanar case routed beyond the first-stage filter.
+     */
+    verifyDoubleAgainstOracle(
+        zero,
+        P(
+            1.0,
+            0.0,
+            1.0
+        ),
+        P(
+            0.0,
+            1.0,
+            1.0
+        ),
+        P(
+            1.0,
+            1.0,
+            0x1.0000000000001p+1
+        )
+    );
+
+
+    /*
+     * Smallest positive binary64 subnormal in all three basis directions.
+     *
+     * This necessarily exercises the full-range dyadic fallback.
+     */
+    enum double minSubnormal =
+        0x0.0000000000001p-1022;
+
+    verifyDoubleAgainstOracle(
+        zero,
+        P(
+            minSubnormal,
+            0.0,
+            0.0
+        ),
+        P(
+            0.0,
+            minSubnormal,
+            0.0
+        ),
+        P(
+            0.0,
+            0.0,
+            minSubnormal
+        )
+    );
+
+
+    /*
+     * Coordinate subtraction itself exceeds binary64.
+     */
+    verifyDoubleAgainstOracle(
+        P(
+            -double.max,
+            0.0,
+            0.0
+        ),
+        P(
+            double.max,
+            0.0,
+            0.0
+        ),
+        P(
+            -double.max,
+            1.0,
+            0.0
+        ),
+        P(
+            -double.max,
+            0.0,
+            1.0
+        )
+    );
+
+
+    /*
+     * Full-span exact coplanarity.
+     */
+    verifyDoubleAgainstOracle(
+        P(
+            -double.max,
+            -double.max,
+            0.0
+        ),
+        P(
+            double.max,
+            -double.max,
+            0.0
+        ),
+        P(
+            -double.max,
+            double.max,
+            0.0
+        ),
+        P(
+            double.max,
+            double.max,
+            0.0
+        )
+    );
+
+
+    /*
+     * Five-versus-one determinant-term sign pattern at extreme binary64
+     * magnitudes. This exercises repeated exact accumulation into one
+     * 198-limb determinant bucket.
+     */
+    verifyDoubleAgainstOracle(
+        P(
+            double.max,
+            0.0,
+            0.0
+        ),
+        P(
+            -double.max,
+            -double.max,
+            -double.max
+        ),
+        P(
+            -double.max,
+            -double.max,
+            double.max
+        ),
+        P(
+            -double.max,
+            double.max,
+            -double.max
+        )
+    );
+
+
+    /*
+     * Deterministic complete-finite-binary64 public-pipeline sweep.
+     *
+     * The independent BigInt oracle decides the exact result while the
+     * production function chooses among filter, expansion, and dyadic paths.
+     */
+    ulong state =
+        0x243f_6a88_85a3_08d3UL;
+
+    enum randomCases =
+        512;
+
+
+    foreach (_; 0 .. randomCases)
+    {
+        verifyDoubleAgainstOracle(
+            randomDoublePoint(state),
+            randomDoublePoint(state),
+            randomDoublePoint(state),
+            randomDoublePoint(state)
         );
     }
 }
