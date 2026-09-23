@@ -252,6 +252,65 @@ Orientation3 orientation(
 }
 
 
+/**
+ * Robust exact orientation predicate for Point3!float.
+ *
+ * Preconditions:
+ *
+ *     all coordinates are finite.
+ *
+ * Every finite IEEE binary32 value is exactly representable as binary64.
+ * Each coordinate is therefore promoted exactly to double and evaluated by
+ * the complete robust binary64 Orientation3 backend.
+ *
+ * No predicate information is lost by this promotion.
+ *
+ * Degenerate affine configurations remain valid inputs.
+ *
+ * No allocation is performed.
+ *
+ * Complexity:
+ *     O(1) time and O(1) auxiliary space.
+ */
+Orientation3 orientation(
+    Point3!float a,
+    Point3!float b,
+    Point3!float c,
+    Point3!float d
+)
+    pure nothrow @safe @nogc
+{
+    assert(a.isFinite);
+    assert(b.isFinite);
+    assert(c.isFinite);
+    assert(d.isFinite);
+
+
+    return orientation(
+        Point3!double(
+            cast(double) a.x,
+            cast(double) a.y,
+            cast(double) a.z
+        ),
+        Point3!double(
+            cast(double) b.x,
+            cast(double) b.y,
+            cast(double) b.z
+        ),
+        Point3!double(
+            cast(double) c.x,
+            cast(double) c.y,
+            cast(double) c.z
+        ),
+        Point3!double(
+            cast(double) d.x,
+            cast(double) d.y,
+            cast(double) d.z
+        )
+    );
+}
+
+
 
 static assert(
     Orientation3.init ==
@@ -275,13 +334,12 @@ static assert(
  * binary64 is supported by the complete filter -> expansion -> dyadic
  * pipeline.
  *
- * binary32 remains deliberately deferred to Slice 5, where exact promotion
- * to binary64 will reuse this backend.
+ * binary32 is supported by exact promotion to that binary64 backend.
  *
  * real remains unsupported until a platform-aware robust backend is designed.
  */
 static assert(
-    !__traits(
+    __traits(
         compiles,
         orientation(
             Point3!float.init,
@@ -1350,4 +1408,172 @@ version(unittest)
             randomDoublePoint(state)
         );
     }
+}
+
+
+@safe unittest
+{
+    alias P =
+        Point3!float;
+
+
+    /*
+     * Canonical positive binary32 orientation.
+     */
+    assert(
+        orientation(
+            P(0.0f, 0.0f, 0.0f),
+            P(1.0f, 0.0f, 0.0f),
+            P(0.0f, 1.0f, 0.0f),
+            P(0.0f, 0.0f, 1.0f)
+        ) ==
+        Orientation3.positive
+    );
+
+
+    /*
+     * One transposition reverses sign.
+     */
+    assert(
+        orientation(
+            P(0.0f, 0.0f, 0.0f),
+            P(0.0f, 1.0f, 0.0f),
+            P(1.0f, 0.0f, 0.0f),
+            P(0.0f, 0.0f, 1.0f)
+        ) ==
+        Orientation3.negative
+    );
+
+
+    /*
+     * Exact coplanarity survives exact promotion.
+     */
+    assert(
+        orientation(
+            P(0.0f, 0.0f, 0.0f),
+            P(1.0f, 0.0f, 0.0f),
+            P(0.0f, 1.0f, 0.0f),
+            P(1.0f, 1.0f, 0.0f)
+        ) ==
+        Orientation3.coplanar
+    );
+
+
+    /*
+     * The smallest positive binary32 subnormal is represented exactly in
+     * binary64. Its cubic determinant is far below binary32 range, but the
+     * delegated robust binary64 backend still returns the exact sign.
+     */
+    enum float minSubnormal =
+        0x1p-149f;
+
+    assert(
+        orientation(
+            P(0.0f, 0.0f, 0.0f),
+            P(minSubnormal, 0.0f, 0.0f),
+            P(0.0f, minSubnormal, 0.0f),
+            P(0.0f, 0.0f, minSubnormal)
+        ) ==
+        Orientation3.positive
+    );
+
+
+    /*
+     * Complete finite binary32 coordinate span remains exact after
+     * promotion.
+     */
+    assert(
+        orientation(
+            P(-float.max, 0.0f, 0.0f),
+            P( float.max, 0.0f, 0.0f),
+            P(-float.max, 1.0f, 0.0f),
+            P(-float.max, 0.0f, 1.0f)
+        ) ==
+        Orientation3.positive
+    );
+
+
+    /*
+     * The next binary32 value above 2.0 gives a near-coplanar positive
+     * determinant. Promotion to binary64 preserves that value exactly.
+     */
+    enum float aboveTwo =
+        0x1.000002p+1f;
+
+    assert(
+        orientation(
+            P(0.0f, 0.0f, 0.0f),
+            P(1.0f, 0.0f, 1.0f),
+            P(0.0f, 1.0f, 1.0f),
+            P(1.0f, 1.0f, aboveTwo)
+        ) ==
+        Orientation3.positive
+    );
+
+
+    /*
+     * Explicitly verify the architectural contract:
+     *
+     * binary32 Orientation3 is exactly the binary64 result after coordinate
+     * promotion.
+     */
+    const P a =
+        P(
+            -17.25f,
+            3.5f,
+            0x1p-20f
+        );
+
+    const P b =
+        P(
+            91.0f,
+            -11.75f,
+            7.125f
+        );
+
+    const P c =
+        P(
+            -0.5f,
+            33.0f,
+            -19.25f
+        );
+
+    const P d =
+        P(
+            4.0f,
+            -8.0f,
+            12.0f
+        );
+
+
+    assert(
+        orientation(
+            a,
+            b,
+            c,
+            d
+        ) ==
+        orientation(
+            Point3!double(
+                cast(double) a.x,
+                cast(double) a.y,
+                cast(double) a.z
+            ),
+            Point3!double(
+                cast(double) b.x,
+                cast(double) b.y,
+                cast(double) b.z
+            ),
+            Point3!double(
+                cast(double) c.x,
+                cast(double) c.y,
+                cast(double) c.z
+            ),
+            Point3!double(
+                cast(double) d.x,
+                cast(double) d.y,
+                cast(double) d.z
+            )
+        )
+    );
 }
