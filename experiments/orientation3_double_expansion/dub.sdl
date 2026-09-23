@@ -1,0 +1,10 @@
+name "orientation3-double-expansion-research"
+description "Research prototype for exact binary64 orient3d expansion fallback"
+authors "Alexander Bernardi"
+license "MIT"
+targetType "executable"
+sourcePaths "source"
+
+dflags "-preview=dip1000"
+
+dependency "geo3-d" path="../.."
