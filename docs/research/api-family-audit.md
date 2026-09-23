@@ -33,6 +33,15 @@ between equivalent concepts is a design contract.
   `aa64e3ae76106d3c7b15b905907a567414c31ad5`
 - public module root: `geo3`
 
+Orientation3 integration refresh:
+
+- branch: `main`
+- commit:
+  `88b0b88ce50a644a8554f96448fb970602a9dcac`
+- completed implementation slices:
+  integral exact predicate, certified binary64 filter, exact expansion
+  fallback, full-range dyadic fallback, and exact binary32 promotion
+
 Shared contract package:
 
 - `euclid-core-d ~>0.1.0`
@@ -207,30 +216,76 @@ and returns `Orientation2`.
 
 ### 3D
 
-The plausible affine 3D family operation is:
+The corresponding affine 3D family operation is:
 
 ```d
 orientation(a, b, c, d)
 ```
 
-and would classify the sign of oriented tetrahedral volume.
+and returns `Orientation3`.
+
+Its public sign convention is the exact sign of:
+
+```text
+det(b-a, c-a, d-a)
+```
+
+with:
+
+```d
+enum Orientation3 : byte
+{
+    coplanar = 0,
+    negative = -1,
+    positive = 1,
+}
+```
+
+The canonical sign lock is:
+
+```text
+a = (0,0,0)
+b = (1,0,0)
+c = (0,1,0)
+d = (0,0,1)
+
+orientation(a,b,c,d) == Orientation3.positive
+```
+
+`Orientation3.init` is deliberately the neutral `coplanar` state. This is an
+intentional semantic difference from the legacy-compatible
+`Orientation2.init == Orientation2.right` contract.
 
 A three-point 3D cross product is not this affine orientation operation.
 
-The exact public semantics of `Orientation3`, including names for the
-negative, zero/coplanar, and positive states, are not yet fixed by family
-symmetry alone.
+The supported production scalar domains are:
 
-Robust implementation is also dimension-specific:
+- `int` — exact fixed-width determinant-sign arithmetic;
+- `long` — exact fixed-width determinant-sign arithmetic;
+- `float` — exact promotion to binary64;
+- `double` — certified filter, exact expansion fallback, then exact
+  full-range fixed-width dyadic fallback;
+- `real` — deliberately unsupported until a platform-aware robust backend is
+  designed.
 
-- integer determinant growth differs from 2D;
-- floating-point filters and exact fallback need 3D analysis;
-- near-coplanar and extreme-scale inputs need independent oracle tests.
+For floating inputs, all coordinates must be finite.
 
-Status: research required.
+No epsilon or tolerance participates in classification. Degenerate affine
+configurations are valid and return `coplanar` exactly when the mathematical
+determinant is zero.
 
-No public `Orientation3` should be introduced merely by mechanically extending
-the 2D enum.
+The public predicate is `pure`, `nothrow`, `@safe`, `@nogc`, and
+allocation-free.
+
+The numerical design and implementation were established by dedicated
+Orientation3 research rather than mechanical dimensional extension. Validation
+includes independent arbitrary-precision oracle comparison, permutation
+identities, near-coplanar cases, complete integral coordinate spans,
+binary64 subnormals, `double.max`, overflowing binary64 coordinate
+differences, extreme exponent imbalance, and full-range exact coplanarity.
+
+Status: aligned, with intentional divergence in enum state naming and `.init`
+semantics where the 3D affine predicate requires a neutral coplanar state.
 
 ## Intersection audit
 
@@ -365,28 +420,50 @@ No additional declaration should move into `euclid-core-d` merely because
 
 ## Root-package capability versus contract exports
 
-The current `geo3` root exports:
+The `geo3` root now exports the implemented 3D value/view and
+dimension-neutral operation families:
 
 - `Point3`;
+- `Vector3`;
+- `Segment3`;
+- `Bounds3`;
+- `Polyline3View`;
+- `LinearRing3View`;
 - `distance`;
-- the seven shared contracts.
+- `squaredDistance`;
+- `segmentLength`;
+- `polylineLength`;
+- `tryNearestPoint`;
+- `tryPointSegmentDistance`;
+- `tryBounds`;
+- `tryConvert`;
+- `Orientation3`;
+- `orientation`.
 
-Several shared declarations are therefore visible before the corresponding
-3D geometry capability exists.
+It also exports the shared contract declarations whose declaration identity is
+owned by `euclid-core-d`:
 
-Examples:
+- `isGeoScalar`;
+- `MetricScalar`;
+- `IntersectionScalar`;
+- `SegmentIntersectionKind`;
+- `RingValidationIssue`;
+- `RingValidationResult`;
+- `douglasPeuckerWorkspaceSize`.
 
-- `SegmentIntersectionKind` exists, but `Segment3` and segment-intersection
-  algorithms do not;
-- `RingValidationIssue` and `RingValidationResult` exist, but
-  `LinearRing3View` and `validateRing` do not;
-- `douglasPeuckerWorkspaceSize` exists, but `Polyline3View` and
-  `trySimplifyDouglasPeuckerInto` do not.
+Shared contract visibility must still not be mistaken for implemented 3D
+algorithm capability. In particular:
 
-This is currently an architecture/coexistence skeleton, not evidence that
-those 3D capabilities have already been designed.
+- `SegmentIntersectionKind` is exported, but robust 3D segment-intersection
+  algorithms remain research-gated;
+- `RingValidationIssue` and `RingValidationResult` are exported, but
+  `validateRing` for 3D remains research-gated;
+- `douglasPeuckerWorkspaceSize` is exported, but
+  `trySimplifyDouglasPeuckerInto` remains consumer-gated.
 
-Future documentation must make that distinction explicit.
+`Orientation3` is different: its research gate has been completed, its robust
+predicate is implemented, and Slice 6 exposes that completed capability
+through the root package.
 
 ## Tooling and package-parity audit
 
@@ -451,12 +528,14 @@ need rather than API completion for its own sake.
 
 ### Research-gated 3D algorithms
 
+Orientation3 research and implementation are complete.
+
 Separately investigate:
 
-- `Orientation3` / robust 3D orientation;
 - robust 3D segment relationships and intersection;
 - `validateRing` in 3D;
-- near-degenerate and extreme-scale numerical behaviour.
+- near-degenerate and extreme-scale numerical behaviour for those remaining
+  predicates.
 
 ### Explicit non-goals
 
@@ -480,14 +559,19 @@ The current `geo3-d` repository now contains the core 3D value/view
 foundation and the identified dimension-neutral metric, bounds, and checked
 conversion families corresponding to `geo-d v2.0.0`.
 
+The robust affine 3D orientation / coplanarity family is now implemented and
+aligned with the sibling API where the mathematics is symmetric, while
+preserving the deliberate 3D enum and neutral `.init` semantics established by
+research.
+
 The remaining major gaps are no longer mechanical family-completion work.
 They involve genuinely three-dimensional mathematics and therefore remain
 research-gated:
 
-- `Orientation3` and robust affine 3D orientation / coplanarity semantics;
 - robust 3D segment relationships and intersection;
 - `validateRing` semantics for three-dimensional cyclic geometry;
-- near-degenerate and extreme-scale numerical behaviour for those predicates.
+- near-degenerate and extreme-scale numerical behaviour for those remaining
+  predicates.
 
 Further design work should continue to preserve the established
 `geo-d v2.0.0` contract where the mathematics is dimensionally symmetric and

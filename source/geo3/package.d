@@ -23,6 +23,10 @@ public import geo3.metric :
     tryNearestPoint,
     tryPointSegmentDistance;
 
+public import geo3.orientation :
+    Orientation3,
+    orientation;
+
 public import geo3.point :
     Point3;
 
