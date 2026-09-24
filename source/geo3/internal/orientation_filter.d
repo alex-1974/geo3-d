@@ -30,9 +30,8 @@ import geo3.internal.binary64_rounding :
 import geo3.point :
     Point3;
 
-import std.math.traits :
-    isFinite,
-    isSubnormal;
+import std.bitmanip :
+    DoubleRep;
 
 
 /**
@@ -68,10 +67,139 @@ private enum double o3dErrboundA =
 
 
 /*
+ * Binary64 finiteness test using the IEEE-754 exponent field directly.
+ *
+ * Raw exponent 2047 denotes infinity or NaN.
+ */
+pragma(inline, true)
+private bool finiteBits(double value)
+    pure nothrow @safe @nogc
+{
+    DoubleRep representation;
+
+    representation.value =
+        value;
+
+    return
+        representation.exponent !=
+        0x7ff;
+}
+
+
+/*
+ * True exactly for binary64 normals and signed zeros.
+ *
+ * Subnormal values, infinity, and NaN return false.
+ */
+pragma(inline, true)
+private bool normalOrZeroBits(double value)
+    pure nothrow @safe @nogc
+{
+    DoubleRep representation;
+
+    representation.value =
+        value;
+
+
+    const uint exponent =
+        representation.exponent;
+
+
+    if (exponent == 0)
+    {
+        return
+            representation.fraction ==
+            0;
+    }
+
+
+    return
+        exponent !=
+        0x7ff;
+}
+
+
+/*
+ * Valid multiplication result for the certified first-stage filter.
+ *
+ * Normal products are accepted.
+ *
+ * Exact zero is accepted only when at least one operand is mathematically
+ * zero. If both operands are non-zero but the rounded product is zero,
+ * multiplication underflow occurred and the filter must fall back.
+ *
+ * Subnormal and non-finite products are rejected.
+ */
+pragma(inline, true)
+private bool validProductBits(
+    double lhs,
+    double rhs,
+    double product
+)
+    pure nothrow @safe @nogc
+{
+    DoubleRep representation;
+
+    representation.value =
+        product;
+
+
+    const uint exponent =
+        representation.exponent;
+
+
+    if (exponent == 0)
+    {
+        if (
+            representation.fraction !=
+            0
+        )
+        {
+            return false;
+        }
+
+
+        return
+            lhs == 0.0 ||
+            rhs == 0.0;
+    }
+
+
+    return
+        exponent !=
+        0x7ff;
+}
+
+
+/*
+ * The certified error bound must be finite, normal, and non-zero.
+ */
+pragma(inline, true)
+private bool validErrorBoundBits(double value)
+    pure nothrow @safe @nogc
+{
+    DoubleRep representation;
+
+    representation.value =
+        value;
+
+
+    const uint exponent =
+        representation.exponent;
+
+
+    return
+        exponent != 0 &&
+        exponent != 0x7ff;
+}
+
+
+/*
  * Absolute value without introducing an external math operation.
  *
  * Inputs reaching this helper are finite.
  */
+pragma(inline, true)
 private double absolute(double value)
     pure nothrow @safe @nogc
 {
@@ -82,45 +210,64 @@ private double absolute(double value)
 
 
 /*
- * The first-stage proof is used only where every relevant intermediate
- * remains binary64 normal or exactly zero.
- *
- * Subnormal values conservatively fall through to an exact backend.
+ * Finite-coordinate guard for the defensive filter entry point.
  */
-private bool normalOrZero(double value)
+pragma(inline, true)
+private bool finitePoint(Point3!double point)
     pure nothrow @safe @nogc
 {
     return
-        value == 0.0 ||
-        (
-            isFinite(value) &&
-            !isSubnormal(value)
-        );
-}
-
-
-/*
- * Detect multiplication underflow to exact zero.
- *
- * Both non-zero operands imply that an exact product exists and is non-zero;
- * a rounded zero therefore cannot participate in the certified filter.
- */
-private bool productUnderflowed(
-    double lhs,
-    double rhs,
-    double product
-)
-    pure nothrow @safe @nogc
-{
-    return
-        product == 0.0 &&
-        lhs != 0.0 &&
-        rhs != 0.0;
+        finiteBits(point.x) &&
+        finiteBits(point.y) &&
+        finiteBits(point.z);
 }
 
 
 /**
- * Attempts to certify binary64 3D orientation.
+ * Defensive first-stage binary64 Orientation3 filter.
+ *
+ * This entry point preserves the historical internal behaviour:
+ * non-finite coordinates are rejected conservatively as `uncertain`.
+ *
+ * Public `orientation(Point3!double, ...)` already has finite coordinates as
+ * a precondition and therefore calls `orientationFilterFinite` directly to
+ * avoid repeating these checks on the hot path.
+ */
+OrientationFilterResult orientationFilter(
+    Point3!double a,
+    Point3!double b,
+    Point3!double c,
+    Point3!double d
+)
+    pure nothrow @safe @nogc
+{
+    if (
+        !finitePoint(a) ||
+        !finitePoint(b) ||
+        !finitePoint(c) ||
+        !finitePoint(d)
+    )
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
+
+
+    return orientationFilterFinite(
+        a,
+        b,
+        c,
+        d
+    );
+}
+
+
+/**
+ * Certified first-stage binary64 Orientation3 filter for finite coordinates.
+ *
+ * Preconditions:
+ *
+ *     every input coordinate is finite.
  *
  * The public geo3-d convention is:
  *
@@ -133,17 +280,15 @@ private bool productUnderflowed(
  * These determinants have opposite sign, so every certified non-zero result
  * is sign-normalized before return.
  *
- * Non-finite inputs are never certified.
+ * All intermediate classification uses direct IEEE-754 binary64 bit
+ * inspection. Subnormal values, arithmetic overflow, multiplication
+ * underflow, and values too close to the error bound conservatively return
+ * `uncertain`.
  *
- * Overflow, subnormal intermediates, possible underflow, and values too close
- * to the error bound conservatively return `uncertain`.
- *
- * A `coplanar` result is returned only when the computed permanent is exactly
- * zero after all potentially underflowing multiplications have already been
- * rejected. In that situation every exact determinant term is structurally
- * zero.
+ * A `coplanar` result is returned only when the permanent is exactly zero
+ * after all potentially underflowing multiplications have been rejected.
  */
-OrientationFilterResult orientationFilter(
+OrientationFilterResult orientationFilterFinite(
     Point3!double a,
     Point3!double b,
     Point3!double c,
@@ -151,15 +296,6 @@ OrientationFilterResult orientationFilter(
 )
     pure nothrow @safe @nogc
 {
-    if (
-        !a.isFinite ||
-        !b.isFinite ||
-        !c.isFinite ||
-        !d.isFinite
-    )
-        return OrientationFilterResult.uncertain;
-
-
     /*
      * Classical orient3d differences relative to d.
      */
@@ -219,22 +355,22 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        !normalOrZero(adx) ||
-        !normalOrZero(bdx) ||
-        !normalOrZero(cdx) ||
-        !normalOrZero(ady) ||
-        !normalOrZero(bdy) ||
-        !normalOrZero(cdy) ||
-        !normalOrZero(adz) ||
-        !normalOrZero(bdz) ||
-        !normalOrZero(cdz)
+        !normalOrZeroBits(adx) ||
+        !normalOrZeroBits(bdx) ||
+        !normalOrZeroBits(cdx) ||
+        !normalOrZeroBits(ady) ||
+        !normalOrZeroBits(bdy) ||
+        !normalOrZeroBits(cdy) ||
+        !normalOrZeroBits(adz) ||
+        !normalOrZeroBits(bdz) ||
+        !normalOrZeroBits(cdz)
     )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
-    /*
-     * Six exact-form 2D product terms used by the determinant and permanent.
-     */
     const double bdxcdy =
         roundedMul(
             bdx,
@@ -273,49 +409,41 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        productUnderflowed(
+        !validProductBits(
             bdx,
             cdy,
             bdxcdy
         ) ||
-        productUnderflowed(
+        !validProductBits(
             cdx,
             bdy,
             cdxbdy
         ) ||
-        productUnderflowed(
+        !validProductBits(
             cdx,
             ady,
             cdxady
         ) ||
-        productUnderflowed(
+        !validProductBits(
             adx,
             cdy,
             adxcdy
         ) ||
-        productUnderflowed(
+        !validProductBits(
             adx,
             bdy,
             adxbdy
         ) ||
-        productUnderflowed(
+        !validProductBits(
             bdx,
             ady,
             bdxady
         )
     )
-        return OrientationFilterResult.uncertain;
-
-
-    if (
-        !normalOrZero(bdxcdy) ||
-        !normalOrZero(cdxbdy) ||
-        !normalOrZero(cdxady) ||
-        !normalOrZero(adxcdy) ||
-        !normalOrZero(adxbdy) ||
-        !normalOrZero(bdxady)
-    )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double bc =
@@ -338,11 +466,14 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        !normalOrZero(bc) ||
-        !normalOrZero(ca) ||
-        !normalOrZero(ab)
+        !normalOrZeroBits(bc) ||
+        !normalOrZeroBits(ca) ||
+        !normalOrZeroBits(ab)
     )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double termA =
@@ -365,31 +496,26 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        productUnderflowed(
+        !validProductBits(
             adz,
             bc,
             termA
         ) ||
-        productUnderflowed(
+        !validProductBits(
             bdz,
             ca,
             termB
         ) ||
-        productUnderflowed(
+        !validProductBits(
             cdz,
             ab,
             termC
         )
     )
-        return OrientationFilterResult.uncertain;
-
-
-    if (
-        !normalOrZero(termA) ||
-        !normalOrZero(termB) ||
-        !normalOrZero(termC)
-    )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double detAB =
@@ -398,8 +524,11 @@ OrientationFilterResult orientationFilter(
             termB
         );
 
-    if (!normalOrZero(detAB))
-        return OrientationFilterResult.uncertain;
+    if (!normalOrZeroBits(detAB))
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double det =
@@ -408,13 +537,13 @@ OrientationFilterResult orientationFilter(
             termC
         );
 
-    if (!normalOrZero(det))
-        return OrientationFilterResult.uncertain;
+    if (!normalOrZeroBits(det))
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
-    /*
-     * Permanent used by Shewchuk's first-stage orient3d error bound.
-     */
     const double permanentPairA =
         roundedAdd(
             absolute(bdxcdy),
@@ -435,11 +564,14 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        !normalOrZero(permanentPairA) ||
-        !normalOrZero(permanentPairB) ||
-        !normalOrZero(permanentPairC)
+        !normalOrZeroBits(permanentPairA) ||
+        !normalOrZeroBits(permanentPairB) ||
+        !normalOrZeroBits(permanentPairC)
     )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double absAdz =
@@ -472,31 +604,26 @@ OrientationFilterResult orientationFilter(
 
 
     if (
-        productUnderflowed(
+        !validProductBits(
             permanentPairA,
             absAdz,
             permanentA
         ) ||
-        productUnderflowed(
+        !validProductBits(
             permanentPairB,
             absBdz,
             permanentB
         ) ||
-        productUnderflowed(
+        !validProductBits(
             permanentPairC,
             absCdz,
             permanentC
         )
     )
-        return OrientationFilterResult.uncertain;
-
-
-    if (
-        !normalOrZero(permanentA) ||
-        !normalOrZero(permanentB) ||
-        !normalOrZero(permanentC)
-    )
-        return OrientationFilterResult.uncertain;
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double permanentAB =
@@ -505,8 +632,11 @@ OrientationFilterResult orientationFilter(
             permanentB
         );
 
-    if (!normalOrZero(permanentAB))
-        return OrientationFilterResult.uncertain;
+    if (!normalOrZeroBits(permanentAB))
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     const double permanent =
@@ -515,18 +645,18 @@ OrientationFilterResult orientationFilter(
             permanentC
         );
 
-    if (!normalOrZero(permanent))
-        return OrientationFilterResult.uncertain;
+    if (!normalOrZeroBits(permanent))
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
-    /*
-     * Every potentially underflowed multiplication has already been rejected.
-     *
-     * Therefore permanent == 0 means that all exact determinant terms are
-     * structurally zero.
-     */
     if (permanent == 0.0)
-        return OrientationFilterResult.coplanar;
+    {
+        return
+            OrientationFilterResult.coplanar;
+    }
 
 
     const double errbound =
@@ -536,15 +666,11 @@ OrientationFilterResult orientationFilter(
         );
 
 
-    /*
-     * Never certify through error-bound overflow or underflow.
-     */
-    if (
-        !isFinite(errbound) ||
-        errbound == 0.0 ||
-        isSubnormal(errbound)
-    )
-        return OrientationFilterResult.uncertain;
+    if (!validErrorBoundBits(errbound))
+    {
+        return
+            OrientationFilterResult.uncertain;
+    }
 
 
     /*
@@ -553,13 +679,23 @@ OrientationFilterResult orientationFilter(
      * geo3-d uses the opposite public convention, hence the inversion.
      */
     if (det > errbound)
-        return OrientationFilterResult.negative;
+    {
+        return
+            OrientationFilterResult.negative;
+    }
+
 
     if (-det > errbound)
-        return OrientationFilterResult.positive;
+    {
+        return
+            OrientationFilterResult.positive;
+    }
 
-    return OrientationFilterResult.uncertain;
+
+    return
+        OrientationFilterResult.uncertain;
 }
+
 
 
 static assert(
@@ -586,6 +722,9 @@ version(unittest)
 
     import std.bitmanip :
         DoubleRep;
+
+    import std.math.traits :
+        isFinite;
 
 
     private alias P =
@@ -789,6 +928,17 @@ version(unittest)
                 c,
                 d
             );
+
+
+        assert(
+            orientationFilterFinite(
+                a,
+                b,
+                c,
+                d
+            ) ==
+            filtered
+        );
 
 
         final switch (filtered)
