@@ -1,0 +1,12 @@
+name "orientation3-benchmark"
+description "Performance research for geo3-d Orientation3"
+authors "Alexander Bernardi"
+license "MIT"
+targetType "executable"
+sourcePaths "source"
+
+preGenerateCommands "python3 generate_local_filter.py"
+
+dflags "-preview=dip1000"
+
+dependency "geo3-d" path="../.."

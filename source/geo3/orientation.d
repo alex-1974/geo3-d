@@ -26,7 +26,7 @@ import geo3.internal.orientation_expansion :
 
 import geo3.internal.orientation_filter :
     OrientationFilterResult,
-    orientationFilter;
+    orientationFilterFinite;
 
 import geo3.internal.orientation_integral :
     orientationIntegralSign;
@@ -194,7 +194,7 @@ Orientation3 orientation(
 
 
     const OrientationFilterResult filtered =
-        orientationFilter(
+        orientationFilterFinite(
             a,
             b,
             c,
