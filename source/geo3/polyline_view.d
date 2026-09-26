@@ -28,6 +28,11 @@ import geo3.segment : Segment3;
  * ownership of the backing storage, which must remain valid for the
  * lifetime of the view.
  *
+ * With DIP1000 enabled by the consumer, the constructor's lifetime
+ * annotations allow the compiler to reject escaping views of stack-owned
+ * backing storage. This package does not force preview language switches
+ * on consumers.
+ *
  * The view aliases its backing storage. Changes made to mutable backing
  * storage through its owner remain visible through an existing view.
  * Mutation is not exposed through Polyline3View itself.
@@ -310,21 +315,4 @@ public:
     assert(immutableView[0] == P(-1.0, 2.0, 3.0));
     assert(immutableView[1] == P(4.0, -5.0, 6.0));
 
-
-    /*
-     * DIP1000 must reject a view escaping stack-owned backing storage.
-     */
-    static assert(
-        !__traits(
-            compiles,
-            {
-                @safe V invalidEscape()
-                {
-                    P[2] local;
-
-                    return V(local[]);
-                }
-            }
-        )
-    );
 }

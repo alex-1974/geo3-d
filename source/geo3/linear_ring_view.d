@@ -28,6 +28,11 @@ import geo3.segment : Segment3;
  * ownership of the backing storage, which must remain valid for the
  * lifetime of the view.
  *
+ * With DIP1000 enabled by the consumer, the constructor's lifetime
+ * annotations allow the compiler to reject escaping views of stack-owned
+ * backing storage. This package does not force preview language switches
+ * on consumers.
+ *
  * The view aliases its backing storage. Changes made to mutable backing
  * storage through its owner remain visible through an existing view.
  * Mutation is not exposed through LinearRing3View itself.
@@ -446,21 +451,4 @@ public:
         P(-1.0, 0.0, 1.0)
     );
 
-
-    /*
-     * DIP1000 must reject a view escaping stack-owned backing storage.
-     */
-    static assert(
-        !__traits(
-            compiles,
-            {
-                @safe R invalidEscape()
-                {
-                    P[3] local;
-
-                    return R(local[]);
-                }
-            }
-        )
-    );
 }
