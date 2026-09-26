@@ -11,3 +11,5 @@ __dummy.html
 *-test-library
 
 dub.selections.json
+
+.workspace/
