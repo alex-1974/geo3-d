@@ -1,12 +1,12 @@
-name: CI
+name: Release Gate
 
 on:
-  push:
-    branches:
-      - develop
   pull_request:
     branches:
-      - develop
+      - main
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   compiler-gate:
-    name: Fast / ${{ matrix.compiler }}
+    name: Release / ${{ matrix.compiler }}
     runs-on: ubuntu-24.04
 
     strategy:
@@ -22,7 +22,11 @@ jobs:
       matrix:
         compiler:
           - dmd-2.111.0
+          - dmd-2.112.1
+          - dmd-2.113.0
           - ldc-1.41.0
+          - ldc-1.42.0
+          - ldc-1.43.0
 
     steps:
       - name: Check out repository
