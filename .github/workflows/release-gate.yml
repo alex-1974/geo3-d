@@ -1,0 +1,57 @@
+name: Release Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compiler-gate:
+    name: Release / ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - dmd-2.111.0
+          - dmd-2.112.1
+          - dmd-2.113.0
+          - ldc-1.41.0
+          - ldc-1.42.0
+          - ldc-1.43.0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+
+      - name: Compiler versions
+        shell: bash
+        run: |
+          echo "DC=$DC"
+          "$DC" --version
+          dub --version
+
+      - name: Run unit tests
+        shell: bash
+        run: dub test --compiler="$DC" --force
+
+      - name: Run lifetime compile-negative tests
+        shell: bash
+        run: bash tests/compile-negative/run.sh "$DC"
+
+      - name: Build release configuration
+        shell: bash
+        run: dub build --build=release --compiler="$DC" --force
