@@ -1,0 +1,7 @@
+name "geo3-static-vector-orientation-probe"
+description "Research performance probe for exact Orientation3 expansion backend"
+targetType "executable"
+targetName "probe"
+targetPath "bin"
+
+dependency "geo3-d" path="../.."
