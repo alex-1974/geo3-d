@@ -44,6 +44,12 @@ jobs:
           repository: alex-1974/containers-d
           ref: f853f6cb2c77b2a5afeebfb9bb2be30768422f80
           path: containers-d
+      - name: Check out euclid-core-d dependency
+        uses: actions/checkout@v7
+        with:
+          repository: alex-1974/euclid-core-d
+          ref: v0.1.2
+          path: euclid-core-d
 
       - name: Install D compiler
         uses: dlang-community/setup-dlang@v2
@@ -72,12 +78,14 @@ jobs:
 
           "$DC" "${COMMON[@]}" \
             -Ibaseline/source \
+            -Ieuclid-core-d/source \
             experiments/static_vector_consumer_probe.d \
             -of=build/static-vector-consumer/baseline
 
           "$DC" "${COMMON[@]}" \
             -Isource \
             -Icontainers-d/source \
+            -Ieuclid-core-d/source \
             experiments/static_vector_consumer_probe.d \
             -of=build/static-vector-consumer/candidate
 
