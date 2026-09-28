@@ -7,3 +7,6 @@ targetType "library"
 sourcePaths "source"
 
 dependency "euclid-core-d" version="~>0.1.0"
+
+# M4.3 research dependency: exact containers-d candidate commit.
+dependency "containers-d" repository="git+https://github.com/alex-1974/containers-d.git" version="f853f6cb2c77b2a5afeebfb9bb2be30768422f80"
