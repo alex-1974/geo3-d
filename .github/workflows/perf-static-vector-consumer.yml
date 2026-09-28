@@ -1,0 +1,174 @@
+name: StaticVector Consumer Probe
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - experiments/static_vector_consumer_probe.d
+      - source/geo3/internal/expansion.d
+      - source/geo3/internal/orientation_expansion.d
+      - dub.sdl
+      - .github/workflows/perf-static-vector-consumer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: geo3 develop vs StaticVector / ${{ matrix.compiler }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - dmd-2.111.0
+          - ldc-1.41.0
+
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v7
+
+      - name: Check out geo3-d develop baseline
+        uses: actions/checkout@v7
+        with:
+          repository: alex-1974/geo3-d
+          ref: develop
+          path: baseline
+
+      - name: Check out containers-d candidate
+        uses: actions/checkout@v7
+        with:
+          repository: alex-1974/containers-d
+          ref: f853f6cb2c77b2a5afeebfb9bb2be30768422f80
+          path: containers-d
+      - name: Check out euclid-core-d dependency
+        uses: actions/checkout@v7
+        with:
+          repository: alex-1974/euclid-core-d
+          ref: v0.1.2
+          path: euclid-core-d
+
+      - name: Install D compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+
+      - name: Install Callgrind
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+
+      - name: Build baseline and candidate
+        shell: bash
+        run: |
+          mkdir -p build/static-vector-consumer
+
+          case "${{ matrix.compiler }}" in
+            dmd-*)
+              COMMON=(-O -release -inline -boundscheck=off -i)
+              ;;
+            ldc-*)
+              COMMON=(-O3 -release -boundscheck=off -i)
+              ;;
+          esac
+
+          "$DC" "${COMMON[@]}" \
+            -Ibaseline/source \
+            -Ieuclid-core-d/source \
+            experiments/static_vector_consumer_probe.d \
+            -of=build/static-vector-consumer/baseline
+
+          "$DC" "${COMMON[@]}" \
+            -Isource \
+            -Icontainers-d/source \
+            -Ieuclid-core-d/source \
+            experiments/static_vector_consumer_probe.d \
+            -of=build/static-vector-consumer/candidate
+
+          "$DC" --version
+
+      - name: Verify semantic equivalence
+        shell: bash
+        run: |
+          ROUNDS=4096
+
+          for op in scale2 sum4x4 orientation-coplanar orientation-near; do
+            b=$(build/static-vector-consumer/baseline "$op" "$ROUNDS" | awk '{print $2}')
+            c=$(build/static-vector-consumer/candidate "$op" "$ROUNDS" | awk '{print $2}')
+            echo "$op baseline=$b candidate=$c"
+            test "$b" = "$c"
+          done
+
+      - name: Measure retired instructions
+        shell: bash
+        run: |
+          ROUNDS=131072
+          RESULTS=build/static-vector-consumer/results.tsv
+          printf 'compiler\top\tvariant\trounds\tIr\tchecksum\n' > "$RESULTS"
+
+          measure() {
+            op="$1"
+            symbol="$2"
+            variant="$3"
+            bin="build/static-vector-consumer/$variant"
+            out="build/static-vector-consumer/callgrind-${op}-${variant}.out"
+
+            checksum=$("$bin" "$op" "$ROUNDS" | awk '{print $2}')
+
+            valgrind \
+              --tool=callgrind \
+              --collect-atstart=no \
+              --toggle-collect="$symbol" \
+              --callgrind-out-file="$out" \
+              "$bin" "$op" "$ROUNDS" \
+              >/dev/null 2>&1
+
+            ir=$(awk '/^summary:/ {print $2}' "$out")
+
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "${{ matrix.compiler }}" \
+              "$op" \
+              "$variant" \
+              "$ROUNDS" \
+              "$ir" \
+              "$checksum" \
+              >> "$RESULTS"
+          }
+
+          for variant in baseline candidate; do
+            measure scale2 bench_scale2 "$variant"
+            measure sum4x4 bench_sum4x4 "$variant"
+            measure orientation-coplanar bench_orientation_coplanar "$variant"
+            measure orientation-near bench_orientation_near "$variant"
+          done
+
+          cat "$RESULTS"
+
+          {
+            echo '### ${{ matrix.compiler }} — geo3-d real consumer'
+            echo
+            echo '| Operation | Baseline Ir | Candidate Ir | Delta | Delta % |'
+            echo '|---|---:|---:|---:|---:|'
+            for op in scale2 sum4x4 orientation-coplanar orientation-near; do
+              b=$(awk -F '\t' -v op="$op" '$2 == op && $3 == "baseline" {print $5}' "$RESULTS")
+              c=$(awk -F '\t' -v op="$op" '$2 == op && $3 == "candidate" {print $5}' "$RESULTS")
+              awk -v op="$op" -v b="$b" -v c="$c" 'BEGIN {
+                d = c - b;
+                p = b == 0 ? 0 : d * 100.0 / b;
+                printf "| %s | %d | %d | %+d | %+.6f%% |\n", op, b, c, d, p;
+              }'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload comparison evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: geo3-static-vector-consumer-${{ matrix.compiler }}
+          path: |
+            build/static-vector-consumer/results.tsv
+            build/static-vector-consumer/callgrind-*.out
+          if-no-files-found: error
